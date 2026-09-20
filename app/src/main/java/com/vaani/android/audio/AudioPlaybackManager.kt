@@ -3,15 +3,18 @@ package com.vaani.android.audio
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.os.Process
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -33,7 +36,16 @@ class AudioPlaybackManager @Inject constructor() {
 
     private var audioTrack: AudioTrack? = null
     private var playbackJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.IO + Job())
+
+    // Dedicated urgent-audio-priority thread instead of the shared Dispatchers.IO pool -- same
+    // reasoning as AudioRecordManager's recordingExecutor: this loop's job is feeding
+    // AudioTrack.write() promptly enough to avoid underrun, and a shared pool gives no priority
+    // guarantee against whatever else the app schedules there. See AudioRecordManager for why
+    // the priority is set as the executor's first task rather than via the thread factory.
+    private val playbackExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "AudioPlaybackThread") }.apply {
+        execute { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO) }
+    }
+    private val scope = CoroutineScope(playbackExecutor.asCoroutineDispatcher() + Job())
 
     private val chunkChannel = Channel<ByteArray>(capacity = Channel.UNLIMITED)
     private val isPlaying = AtomicBoolean(false)

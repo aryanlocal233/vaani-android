@@ -8,17 +8,19 @@ import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.AutomaticGainControl
 import android.media.audiofx.NoiseSuppressor
+import android.os.Process
 import androidx.annotation.RequiresPermission
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -39,7 +41,22 @@ class AudioRecordManager @Inject constructor(
 ) {
     private var audioRecord: AudioRecord? = null
     private var recordingJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.IO + Job())
+
+    // A dedicated single thread at THREAD_PRIORITY_URGENT_AUDIO, not the shared Dispatchers.IO
+    // pool. IO's pool is sized/scheduled for blocking I/O work generally, with no priority
+    // guarantee against everything else the app schedules there -- for a 30ms-cadence capture
+    // loop that directly feeds VAD/network chunking, any scheduling delay risks a dropped or
+    // late frame (perceived as the same crackling/dropout family of bugs already chased this
+    // session). THREAD_PRIORITY_URGENT_AUDIO is the same priority class Android's own audio
+    // subsystem uses for its mixer thread. It must be set via Process.setThreadPriority() from
+    // inside the target thread itself (it's a Linux nice-value adjustment, not the unrelated
+    // java.lang.Thread.priority field) -- executing it as the executor's first queued task
+    // works because a single-thread executor guarantees every later task, including this
+    // dispatcher's coroutine continuations, runs on that same one now-elevated thread.
+    private val recordingExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "AudioRecordThread") }.apply {
+        execute { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO) }
+    }
+    private val scope = CoroutineScope(recordingExecutor.asCoroutineDispatcher() + Job())
 
     private var noiseSuppressor: NoiseSuppressor? = null
     private var echoCanceler: AcousticEchoCanceler? = null
@@ -113,19 +130,27 @@ class AudioRecordManager @Inject constructor(
 
         recordingJob = scope.launch {
             val frameBuffer = ByteArray(AudioConfig.FRAME_SIZE_BYTES)
+            // Reused for every muted frame rather than allocated per-frame: its content (all
+            // zero) never changes and nothing downstream mutates a received frame, so sharing
+            // this one reference is safe. This is also the *common* case duration-wise -- the
+            // mic sits muted for the entire SPEAKING phase of every turn -- so it's the
+            // allocation most worth avoiding entirely, not just doing more cheaply.
             val silence = ByteArray(AudioConfig.FRAME_SIZE_BYTES)
             while (isActive && isRecording.get()) {
                 val read = record.read(frameBuffer, 0, frameBuffer.size)
                 if (read <= 0) continue
 
-                val frameToEmit = if (isMuted.get()) {
-                    silence
-                } else if (read == frameBuffer.size) {
-                    frameBuffer
-                } else {
-                    frameBuffer.copyOf(read)
+                // frameBuffer is reused every loop iteration, so any non-silence path must hand
+                // out a fresh copy -- but exactly one copy, not two: copyOf(read) below already
+                // allocates a new array, so re-copying it afterwards (the previous version of
+                // this code did) was pure waste on a loop that runs ~33 times/sec for the
+                // lifetime of every session.
+                val frameToEmit = when {
+                    isMuted.get() -> silence
+                    read == frameBuffer.size -> frameBuffer.copyOf()
+                    else -> frameBuffer.copyOf(read)
                 }
-                _frames.emit(frameToEmit.copyOf())
+                _frames.emit(frameToEmit)
             }
         }
         Timber.i("AudioRecordManager started (bufferSize=$bufferSize)")
