@@ -57,6 +57,21 @@ class TranslationOrchestrator @Inject constructor(
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
+    /**
+     * Language actually detected for the most recent utterance/response, as reported by the
+     * backend's "lang" field on the transcript/translation events. The session's WebSocket
+     * connects with a (langA, langB) pair, and the backend now auto-detects which one was
+     * actually spoken per utterance and translates to the other -- direction can flip from one
+     * utterance to the next on the *same* connection, no reconnect needed. These are purely for
+     * display (e.g. labelling the transcript/translation with which language they're in); they
+     * don't drive any session/connection logic.
+     */
+    private val _detectedSrcLang = MutableStateFlow<String?>(null)
+    val detectedSrcLang: StateFlow<String?> = _detectedSrcLang.asStateFlow()
+
+    private val _detectedTgtLang = MutableStateFlow<String?>(null)
+    val detectedTgtLang: StateFlow<String?> = _detectedTgtLang.asStateFlow()
+
     private var isSessionActive = false
 
     fun startSession(srcLang: String, tgtLang: String) {
@@ -70,6 +85,8 @@ class TranslationOrchestrator @Inject constructor(
         _conversationState.value = ConversationState.IDLE
         _currentTranscript.value = ""
         _currentTranslation.value = ""
+        _detectedSrcLang.value = null
+        _detectedTgtLang.value = null
         _error.value = null
 
         audioPlaybackManager.onPlaybackStarted = {
@@ -170,6 +187,8 @@ class TranslationOrchestrator @Inject constructor(
         isUtteranceActive = true
         isFirstChunkOfUtterance = true
         silenceMs = 0
+        _detectedSrcLang.value = null
+        _detectedTgtLang.value = null
         transitionTo(ConversationState.LISTENING)
     }
 
@@ -216,9 +235,11 @@ class TranslationOrchestrator @Inject constructor(
                     }
                     is WebSocketEvent.TranscriptReceived -> {
                         _currentTranscript.value = event.text
+                        if (event.lang.isNotBlank()) _detectedSrcLang.value = event.lang
                     }
                     is WebSocketEvent.TranslationReceived -> {
                         _currentTranslation.value = event.text
+                        if (event.lang.isNotBlank()) _detectedTgtLang.value = event.lang
                     }
                     is WebSocketEvent.ServerError -> {
                         _error.value = event.message

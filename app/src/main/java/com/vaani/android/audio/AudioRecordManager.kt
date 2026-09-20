@@ -5,6 +5,9 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import androidx.annotation.RequiresPermission
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -37,6 +40,10 @@ class AudioRecordManager @Inject constructor(
     private var audioRecord: AudioRecord? = null
     private var recordingJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + Job())
+
+    private var noiseSuppressor: NoiseSuppressor? = null
+    private var echoCanceler: AcousticEchoCanceler? = null
+    private var agc: AutomaticGainControl? = null
 
     private val _frames = MutableSharedFlow<ByteArray>(extraBufferCapacity = 64)
     val frames: SharedFlow<ByteArray> = _frames.asSharedFlow()
@@ -100,6 +107,7 @@ class AudioRecordManager @Inject constructor(
         }
 
         audioRecord = record
+        attachNoiseEffects(record.audioSessionId)
         record.startRecording()
         isRecording.set(true)
 
@@ -127,6 +135,7 @@ class AudioRecordManager @Inject constructor(
         if (!isRecording.getAndSet(false)) return
         recordingJob?.cancel()
         recordingJob = null
+        releaseNoiseEffects()
         audioRecord?.apply {
             try {
                 stop()
@@ -137,6 +146,44 @@ class AudioRecordManager @Inject constructor(
         }
         audioRecord = null
         Timber.i("AudioRecordManager stopped")
+    }
+
+    /**
+     * Explicitly attaches the platform's noise/echo/gain audio effects to this recording
+     * session. VOICE_COMMUNICATION as an audio *source* is a hint that the HAL often honors
+     * automatically, but it isn't guaranteed on every device/OEM -- explicitly creating these
+     * effects is what actually turns them on where the source hint alone doesn't. This matters
+     * a lot for a hands-free kiosk-style deployment (a mela/fair stall): loud, constant crowd
+     * noise otherwise both degrades STT accuracy and confuses the energy-based VAD in
+     * [VADManager] into false speech triggers. Each effect no-ops safely if unsupported on the
+     * device -- never assume availability.
+     */
+    private fun attachNoiseEffects(audioSessionId: Int) {
+        if (NoiseSuppressor.isAvailable()) {
+            noiseSuppressor = NoiseSuppressor.create(audioSessionId)?.apply { enabled = true }
+            Timber.i("NoiseSuppressor attached: ${noiseSuppressor != null}")
+        } else {
+            Timber.w("NoiseSuppressor not available on this device")
+        }
+
+        if (AcousticEchoCanceler.isAvailable()) {
+            echoCanceler = AcousticEchoCanceler.create(audioSessionId)?.apply { enabled = true }
+            Timber.i("AcousticEchoCanceler attached: ${echoCanceler != null}")
+        }
+
+        if (AutomaticGainControl.isAvailable()) {
+            agc = AutomaticGainControl.create(audioSessionId)?.apply { enabled = true }
+            Timber.i("AutomaticGainControl attached: ${agc != null}")
+        }
+    }
+
+    private fun releaseNoiseEffects() {
+        noiseSuppressor?.release()
+        noiseSuppressor = null
+        echoCanceler?.release()
+        echoCanceler = null
+        agc?.release()
+        agc = null
     }
 
     private fun max(a: Int, b: Int) = if (a > b) a else b

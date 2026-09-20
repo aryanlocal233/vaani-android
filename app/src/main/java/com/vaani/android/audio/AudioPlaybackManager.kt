@@ -82,13 +82,29 @@ class AudioPlaybackManager @Inject constructor() {
                 val firstChunk = chunkChannel.receive()
                 if (!isPlaying.get()) break
 
+                // Jitter buffer: accumulate a little audio before starting playback instead of
+                // writing the very first chunk straight to the track. Playing immediately on
+                // chunk 1 left AudioTrack's buffer starved the moment the server's next chunk
+                // was even slightly late (TTS generation/network jitter), which is audible as
+                // crackling/static partway through an utterance. One wait window here trades a
+                // small amount of startup latency for that headroom.
+                val prebuffered = mutableListOf(firstChunk)
+                var prebufferedBytes = firstChunk.size
+                if (prebufferedBytes < PREBUFFER_TARGET_BYTES) {
+                    val next = withTimeoutOrNull(PREBUFFER_WAIT_MS) { chunkChannel.receive() }
+                    if (next != null) {
+                        prebuffered += next
+                        prebufferedBytes += next.size
+                    }
+                }
+
                 try {
                     track.play()
                 } catch (e: IllegalStateException) {
                     Timber.w(e, "AudioTrack resume failed")
                 }
                 withContext(Dispatchers.Main) { onPlaybackStarted?.invoke() }
-                writeChunk(track, firstChunk)
+                prebuffered.forEach { writeChunk(track, it) }
 
                 while (isActive && isPlaying.get()) {
                     val chunk = withTimeoutOrNull(END_OF_STREAM_GRACE_MS) { chunkChannel.receive() } ?: break
@@ -168,8 +184,34 @@ class AudioPlaybackManager @Inject constructor() {
         /**
          * How long to wait for the next TTS chunk before considering an utterance's audio
          * fully drained. The binary protocol has no explicit "end of stream" frame, so this
-         * debounce is how we detect completion.
+         * debounce is how we detect completion -- and until it fires, onPlaybackFinished
+         * doesn't fire either, so the mic stays muted and the state machine stuck in SPEAKING.
+         * That makes this a dead-air tax on every turn, so it's worth keeping short, but it
+         * also has to survive real jitter: a translated reply may now be synthesized as several
+         * concurrently-fired per-sentence TTS calls (see sarvam_server.py) queued together, and
+         * on a real mobile/WiFi connection at a crowded venue -- not the clean localhost link
+         * this was last tuned against -- gaps between chunks can be materially larger than on a
+         * dev machine. Firing this too early mid-response is worse than the latency it saves:
+         * it prematurely unmutes the mic while the speaker is still playing the tail of the
+         * response, and without hardware AEC pairing (playback uses USAGE_MEDIA, not
+         * VOICE_COMMUNICATION -- see AudioRecordManager) that leaked audio isn't cancelled,
+         * so it's picked up as an audible burst of noise. 900ms is a middle ground: still ~40%
+         * faster than the original 1500ms, with real headroom over the ~350-400ms inter-sentence
+         * gaps measured locally.
          */
-        private const val END_OF_STREAM_GRACE_MS = 1500L
+        private const val END_OF_STREAM_GRACE_MS = 900L
+
+        /** Minimum amount of TTS audio to buffer before playback starts (see jitter buffer above). */
+        private const val PREBUFFER_TARGET_BYTES = AudioConfig.CHUNK_SIZE_BYTES * 2
+
+        /**
+         * Max time to wait for a second chunk to arrive before starting playback anyway.
+         * Shrinking this below the original 250ms traded startup latency for a smaller
+         * pre-roll buffer -- on real network jitter (vs. the clean localhost link it was tuned
+         * against) that smaller buffer underruns more easily, which is audible as crackling at
+         * the start of playback. Restored to 250ms: avoiding that crackle matters more than the
+         * 100ms of startup latency it costs.
+         */
+        private const val PREBUFFER_WAIT_MS = 250L
     }
 }

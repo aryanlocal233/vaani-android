@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Vaani</string>
+    <string name="app_name">Gaya Ji Vaani</string>
+    <string name="brand_name">SmartSafetyTag</string>
+    <string name="content_desc_logo">SmartSafetyTag logo</string>
 
     <string name="state_idle">Ready</string>
     <string name="state_listening">Listening…</string>
@@ -20,13 +22,13 @@
     <string name="status_disconnected">Disconnected</string>
     <string name="status_connecting">Connecting…</string>
 
-    <string name="permission_mic_rationale">Vaani needs microphone access to listen and translate your speech in real time.</string>
-    <string name="permission_mic_denied">Microphone permission is required for Vaani to work. Please enable it in Settings.</string>
+    <string name="permission_mic_rationale">Gaya Ji Vaani needs microphone access to listen and translate your speech in real time.</string>
+    <string name="permission_mic_denied">Microphone permission is required for Gaya Ji Vaani to work. Please enable it in Settings.</string>
     <string name="permission_grant">Grant Permission</string>
     <string name="permission_open_settings">Open Settings</string>
 
-    <string name="notification_channel_name">Vaani Translation</string>
-    <string name="notification_title">Vaani is translating</string>
+    <string name="notification_channel_name">Gaya Ji Vaani Translation</string>
+    <string name="notification_title">Gaya Ji Vaani is translating</string>
     <string name="notification_text">Listening for speech in the background</string>
     <string name="notification_stop_action">Stop</string>
 

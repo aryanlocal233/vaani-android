@@ -25,6 +25,14 @@ class VADManager @Inject constructor() {
     private var speechFrameCount = 0
     private var silenceFrameCount = 0
 
+    // One-pole high-pass filter state, carried continuously across frames (not reset per
+    // frame). Crowd/ambient noise at a loud venue (mela stall) is dominated by low-frequency
+    // rumble -- chatter murmur, PA/speaker hum, wind on the mic -- while speech energy is
+    // concentrated higher up. Pre-filtering before the energy calculation de-emphasizes that
+    // rumble so it's less likely to cross the speech threshold and false-trigger an utterance.
+    private var hpPrevIn: Double = 0.0
+    private var hpPrevOut: Double = 0.0
+
     /**
      * Processes a single ~30ms PCM16 little-endian frame.
      */
@@ -56,6 +64,8 @@ class VADManager @Inject constructor() {
         noiseFloor = INITIAL_NOISE_FLOOR
         speechFrameCount = 0
         silenceFrameCount = 0
+        hpPrevIn = 0.0
+        hpPrevOut = 0.0
     }
 
     private fun computeEnergy(frame: ByteArray): Double {
@@ -64,7 +74,16 @@ class VADManager @Inject constructor() {
         var i = 0
         while (i + 1 < frame.size) {
             val sample = ((frame[i + 1].toInt() shl 8) or (frame[i].toInt() and 0xFF)).toShort()
-            sum += abs(sample.toInt()).toDouble()
+
+            // y[n] = x[n] - x[n-1] + a*y[n-1]: a one-pole high-pass/DC-blocking filter.
+            // a=0.97 puts the cutoff around 100-150Hz at 16kHz, below the speech band but
+            // above most crowd-rumble/hum energy.
+            val x = sample.toDouble()
+            val y = x - hpPrevIn + HP_COEFFICIENT * hpPrevOut
+            hpPrevIn = x
+            hpPrevOut = y
+
+            sum += abs(y)
             i += 2
         }
         val sampleCount = frame.size / 2
@@ -78,5 +97,6 @@ class VADManager @Inject constructor() {
         private const val SPEECH_TO_NOISE_RATIO = 2.2
         private const val NOISE_ADAPT_RATE = 0.05
         private const val SPEECH_ONSET_FRAMES = 2
+        private const val HP_COEFFICIENT = 0.97
     }
 }

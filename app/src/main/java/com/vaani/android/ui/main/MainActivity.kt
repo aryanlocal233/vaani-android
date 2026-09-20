@@ -142,7 +142,7 @@ class MainActivity : AppCompatActivity() {
                 viewModel.uiState.collect { state ->
                     renderLanguages(state)
                     renderConversationState(state)
-                    renderTranscriptAndTranslation(state.transcript, state.translation)
+                    renderTranscriptAndTranslation(state)
                     renderConnectionStatus(state.isConnected)
                     renderError(state.error)
                     renderStartStopButton(state.isSessionActive)
@@ -194,9 +194,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun renderTranscriptAndTranslation(transcript: String, translation: String) {
-        binding.tvTranscript.text = transcript.ifBlank { getString(R.string.hint_transcript) }
-        binding.tvTranslation.text = translation.ifBlank { getString(R.string.hint_translation) }
+    /**
+     * The two selected languages are now an unordered pair -- either person can speak either
+     * one, and the backend auto-detects which per utterance (see MainViewModel's
+     * detectedSrcLanguageName/detectedTgtLanguageName). Labelling each line with the language
+     * it's actually in tells the user which direction just fired, since it isn't fixed to the
+     * "source"/"target" spinners anymore.
+     */
+    private fun renderTranscriptAndTranslation(state: MainUiState) {
+        binding.tvTranscript.text = state.transcript.ifBlank { getString(R.string.hint_transcript) }.let { text ->
+            state.detectedSrcLanguageName?.let { lang -> "[$lang] $text" } ?: text
+        }
+        binding.tvTranslation.text = state.translation.ifBlank { getString(R.string.hint_translation) }.let { text ->
+            state.detectedTgtLanguageName?.let { lang -> "[$lang] $text" } ?: text
+        }
     }
 
     private fun renderConnectionStatus(isConnected: Boolean) {
