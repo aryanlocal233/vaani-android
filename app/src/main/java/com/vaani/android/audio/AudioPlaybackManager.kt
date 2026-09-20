@@ -18,8 +18,12 @@ import javax.inject.Singleton
 
 /**
  * Plays back streamed TTS audio in STREAM mode using [AudioTrack] configured with
- * [AudioAttributes.USAGE_VOICE_COMMUNICATION], which must pair with [AudioRecordManager]'s
- * VOICE_COMMUNICATION source for the platform AEC to cancel this output from the mic input.
+ * [AudioAttributes.USAGE_MEDIA]. Deliberately not USAGE_VOICE_COMMUNICATION: that profile
+ * applies the platform's voice-call noise suppression/AGC chain to *output* too, which
+ * distorts synthesized speech (muffled, crackly). It isn't needed for its usual purpose here
+ * either -- feedback prevention during playback comes from [AudioRecordManager.setMuted],
+ * which zeroes captured frames in software during SPEAKING regardless of AEC pairing, not from
+ * echo-cancelling the mic against this output.
  *
  * Supports low-latency queuing of incoming PCM chunks as they arrive from the WebSocket, and
  * immediate [stopPlayback] for barge-in (user starts speaking while TTS is still playing).
@@ -45,12 +49,12 @@ class AudioPlaybackManager @Inject constructor() {
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT
         )
-        val bufferSize = maxOf(minBufferSize, AudioConfig.CHUNK_SIZE_BYTES * 2)
+        val bufferSize = maxOf(minBufferSize, AudioConfig.CHUNK_SIZE_BYTES * 8)
 
         val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )

@@ -22,10 +22,11 @@ import javax.inject.Singleton
 
 /**
  * Captures microphone audio using [MediaRecorder.AudioSource.VOICE_COMMUNICATION], which routes
- * through the device's hardware Acoustic Echo Canceller (AEC) and Noise Suppressor. This is
- * critical: pairing this source with an [android.media.AudioTrack] configured for
- * [android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION] lets the platform cancel the
- * speaker's own TTS output from the mic signal, preventing feedback loops.
+ * through the device's hardware Acoustic Echo Canceller (AEC) and Noise Suppressor for cleaner
+ * input generally. Feedback prevention during TTS playback does *not* depend on pairing this
+ * with a VOICE_COMMUNICATION-usage [android.media.AudioTrack]: [AudioPlaybackManager] uses
+ * USAGE_MEDIA instead (VOICE_COMMUNICATION output distorts synthesized speech), and feedback is
+ * prevented in software instead, via [setMuted] zeroing captured frames during playback.
  *
  * Emits fixed-size 30ms PCM16 mono frames via [frames].
  */
