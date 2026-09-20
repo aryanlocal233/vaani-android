@@ -157,6 +157,6 @@ class AudioPlaybackManager @Inject constructor() {
          * fully drained. The binary protocol has no explicit "end of stream" frame, so this
          * debounce is how we detect completion.
          */
-        private const val END_OF_STREAM_GRACE_MS = 400L
+        private const val END_OF_STREAM_GRACE_MS = 1500L
     }
 }

@@ -216,6 +216,11 @@ class TranslationOrchestrator @Inject constructor(
                     }
                     is WebSocketEvent.ServerError -> {
                         _error.value = event.message
+                        audioRecordManager.setMuted(false)
+                        transitionTo(ConversationState.IDLE)
+                    }
+                    is WebSocketEvent.NoSpeech -> {
+                        audioRecordManager.setMuted(false)
                         transitionTo(ConversationState.IDLE)
                     }
                 }

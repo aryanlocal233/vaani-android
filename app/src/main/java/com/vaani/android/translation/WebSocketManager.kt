@@ -40,6 +40,7 @@ sealed class WebSocketEvent {
     data class TranslationReceived(val text: String, val lang: String) : WebSocketEvent()
     data class ServerError(val message: String) : WebSocketEvent()
     data class ConnectionFailed(val throwable: Throwable) : WebSocketEvent()
+    data class NoSpeech(val message: String) : WebSocketEvent()
 }
 
 /**
@@ -166,6 +167,9 @@ class WebSocketManager @Inject constructor(
                 }
                 "error" -> scope.launch {
                     _events.emit(WebSocketEvent.ServerError(json.optString("message")))
+                }
+                "no_speech" -> scope.launch {
+                    _events.emit(WebSocketEvent.NoSpeech(json.optString("message")))
                 }
                 else -> Timber.w("Unknown text frame type: $text")
             }

@@ -23,7 +23,7 @@ object AudioConfig {
     const val SILENCE_THRESHOLD_MS = 400
 
     /** Utterances shorter than this are discarded as noise / filler. */
-    const val MIN_UTTERANCE_MS = 1500
+    const val MIN_UTTERANCE_MS = 800
 
     /** Rolling pre-speech buffer retained so utterance onset isn't clipped. */
     const val RING_BUFFER_MS = 2000
