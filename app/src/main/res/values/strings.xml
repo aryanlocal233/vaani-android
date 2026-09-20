@@ -6,6 +6,7 @@
     <string name="state_listening">Listening…</string>
     <string name="state_processing">Translating…</string>
     <string name="state_speaking">Speaking…</string>
+    <string name="state_switching_language">Switching languages…</string>
 
     <string name="label_transcript">Original</string>
     <string name="label_translation">Translation</string>

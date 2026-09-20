@@ -141,7 +141,7 @@ class MainActivity : AppCompatActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.uiState.collect { state ->
                     renderLanguages(state)
-                    renderConversationState(state.conversationState)
+                    renderConversationState(state)
                     renderTranscriptAndTranslation(state.transcript, state.translation)
                     renderConnectionStatus(state.isConnected)
                     renderError(state.error)
@@ -174,16 +174,20 @@ class MainActivity : AppCompatActivity() {
         suppressSpinnerCallbacks = false
     }
 
-    private fun renderConversationState(state: ConversationState) {
-        val (textRes, color) = when (state) {
-            ConversationState.IDLE -> R.string.state_idle to R.color.state_idle
-            ConversationState.LISTENING -> R.string.state_listening to R.color.state_listening
-            ConversationState.PROCESSING -> R.string.state_processing to R.color.state_processing
-            ConversationState.SPEAKING -> R.string.state_speaking to R.color.state_speaking
+    private fun renderConversationState(state: MainUiState) {
+        val (textRes, color) = if (state.isSwitchingLanguage) {
+            R.string.state_switching_language to R.color.state_idle
+        } else {
+            when (state.conversationState) {
+                ConversationState.IDLE -> R.string.state_idle to R.color.state_idle
+                ConversationState.LISTENING -> R.string.state_listening to R.color.state_listening
+                ConversationState.PROCESSING -> R.string.state_processing to R.color.state_processing
+                ConversationState.SPEAKING -> R.string.state_speaking to R.color.state_speaking
+            }
         }
         binding.tvConversationState.setText(textRes)
         binding.tvConversationState.setTextColor(ContextCompat.getColor(this, color))
-        binding.waveformView.visibility = if (state == ConversationState.LISTENING) {
+        binding.waveformView.visibility = if (state.conversationState == ConversationState.LISTENING) {
             android.view.View.VISIBLE
         } else {
             android.view.View.GONE

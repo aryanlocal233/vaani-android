@@ -8,6 +8,8 @@ import com.vaani.android.data.LanguageRepository
 import com.vaani.android.translation.TranslationOrchestrator
 import com.vaani.android.utils.NetworkUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -27,7 +29,8 @@ data class MainUiState(
     val isConnected: Boolean = false,
     val error: String? = null,
     val isSessionActive: Boolean = false,
-    val hasMicPermission: Boolean = false
+    val hasMicPermission: Boolean = false,
+    val isSwitchingLanguage: Boolean = false
 )
 
 @HiltViewModel
@@ -41,6 +44,8 @@ class MainViewModel @Inject constructor(
     private val _targetLanguage = MutableStateFlow(languageRepository.getDefaultTargetLanguage())
     private val _isSessionActive = MutableStateFlow(false)
     private val _hasMicPermission = MutableStateFlow(false)
+    private val _isSwitchingLanguage = MutableStateFlow(false)
+    private var restartSessionJob: Job? = null
 
     val uiState: StateFlow<MainUiState> = combine(
         _sourceLanguage,
@@ -50,7 +55,8 @@ class MainViewModel @Inject constructor(
         orchestrator.currentTranslation,
         orchestrator.isConnected,
         orchestrator.error,
-        _isSessionActive
+        _isSessionActive,
+        _isSwitchingLanguage
     ) { flows ->
         MainUiState(
             allLanguages = languageRepository.getAllLanguages(),
@@ -62,7 +68,8 @@ class MainViewModel @Inject constructor(
             isConnected = flows[5] as Boolean,
             error = flows[6] as String?,
             isSessionActive = flows[7] as Boolean,
-            hasMicPermission = _hasMicPermission.value
+            hasMicPermission = _hasMicPermission.value,
+            isSwitchingLanguage = flows[8] as Boolean
         )
     }.stateIn(
         scope = viewModelScope,
@@ -81,11 +88,13 @@ class MainViewModel @Inject constructor(
     fun setSourceLanguage(language: Language) {
         if (language.code == _targetLanguage.value.code) return
         _sourceLanguage.value = language
+        if (_isSessionActive.value) restartSession()
     }
 
     fun setTargetLanguage(language: Language) {
         if (language.code == _sourceLanguage.value.code) return
         _targetLanguage.value = language
+        if (_isSessionActive.value) restartSession()
     }
 
     fun swapLanguages() {
@@ -93,6 +102,24 @@ class MainViewModel @Inject constructor(
         val tgt = _targetLanguage.value
         _sourceLanguage.value = tgt
         _targetLanguage.value = src
+        if (_isSessionActive.value) restartSession()
+    }
+
+    /**
+     * Language change while a session is live: the old WebSocket connection was opened
+     * with the previous language pair baked into its URL, so it must be torn down and
+     * reopened rather than just relabeled -- otherwise new speech keeps going to the old
+     * pair's endpoint and gets silently ignored server-side.
+     */
+    private fun restartSession() {
+        restartSessionJob?.cancel()
+        restartSessionJob = viewModelScope.launch {
+            _isSwitchingLanguage.value = true
+            orchestrator.stopSession()
+            delay(LANGUAGE_SWITCH_DELAY_MS)
+            orchestrator.startSession(_sourceLanguage.value.code, _targetLanguage.value.code)
+            _isSwitchingLanguage.value = false
+        }
     }
 
     fun startSession() {
@@ -115,5 +142,10 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             orchestrator.stopSession()
         }
+    }
+
+    companion object {
+        /** Time given for the old WebSocket to close cleanly before opening the new one. */
+        private const val LANGUAGE_SWITCH_DELAY_MS = 300L
     }
 }
