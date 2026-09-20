@@ -71,15 +71,19 @@ class TranslationOrchestrator @Inject constructor(
         _error.value = null
 
         audioPlaybackManager.onPlaybackStarted = {
+            Timber.d("onPlaybackStarted fired (state=${_conversationState.value})")
             if (_conversationState.value == ConversationState.PROCESSING) {
                 transitionTo(ConversationState.SPEAKING)
                 audioRecordManager.setMuted(true)
+                Timber.d("State: PROCESSING -> SPEAKING, mic muted for TTS playback")
             }
         }
         audioPlaybackManager.onPlaybackFinished = {
+            Timber.d("onPlaybackFinished fired (state=${_conversationState.value})")
             if (_conversationState.value == ConversationState.SPEAKING) {
                 audioRecordManager.setMuted(false)
                 transitionTo(ConversationState.IDLE)
+                Timber.d("State: SPEAKING -> IDLE, mic unmuted, ready for next utterance")
             }
         }
 
