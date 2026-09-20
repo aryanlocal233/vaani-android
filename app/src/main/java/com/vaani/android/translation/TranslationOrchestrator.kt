@@ -200,10 +200,14 @@ class TranslationOrchestrator @Inject constructor(
             webSocketManager.events.collect { event ->
                 when (event) {
                     is WebSocketEvent.Connected -> _isConnected.value = true
-                    is WebSocketEvent.Disconnected -> _isConnected.value = false
+                    is WebSocketEvent.Disconnected -> {
+                        _isConnected.value = false
+                        resetToIdleIfMidUtterance("WebSocket disconnected unexpectedly")
+                    }
                     is WebSocketEvent.ConnectionFailed -> {
                         _isConnected.value = false
                         _error.value = event.throwable.message ?: "Connection failed"
+                        resetToIdleIfMidUtterance("WebSocket connection failed")
                     }
                     is WebSocketEvent.TtsAudioReceived -> {
                         audioPlaybackManager.queueAudioChunk(event.pcm)
@@ -226,6 +230,27 @@ class TranslationOrchestrator @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Recovers the state machine after the WebSocket drops unexpectedly (server crash,
+     * network loss, etc.) while mid-utterance. Without this, a disconnect during
+     * PROCESSING/SPEAKING left the UI stuck forever with the mic muted and no way to
+     * start a new turn, since only [WebSocketEvent.ServerError]/[WebSocketEvent.NoSpeech]
+     * used to reset state -- an unexpected disconnect fell through with no recovery.
+     */
+    private fun resetToIdleIfMidUtterance(reason: String) {
+        val state = _conversationState.value
+        if (state == ConversationState.IDLE) return
+
+        Timber.w("Resetting state machine to IDLE ($reason), was: $state")
+        audioPlaybackManager.stopPlayback()
+        audioRecordManager.setMuted(false)
+        isUtteranceActive = false
+        isFirstChunkOfUtterance = false
+        silenceMs = 0
+        audioChunkBuffer.discardUtterance()
+        transitionTo(ConversationState.IDLE)
     }
 
     private fun transitionTo(newState: ConversationState) {
