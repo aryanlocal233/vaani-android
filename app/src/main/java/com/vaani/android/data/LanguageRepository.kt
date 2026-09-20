@@ -30,5 +30,5 @@ class LanguageRepository @Inject constructor() {
 
     fun getDefaultSourceLanguage(): Language = getLanguageByCode("hi") ?: languages.first()
 
-    fun getDefaultTargetLanguage(): Language = getLanguageByCode("en") ?: languages.last()
+    fun getDefaultTargetLanguage(): Language = getLanguageByCode("ta") ?: languages[1]
 }
