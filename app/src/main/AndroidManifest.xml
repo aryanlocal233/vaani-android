@@ -23,6 +23,7 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.Vaani"
+        android:usesCleartextTraffic="true"
         tools:targetApi="34">
 
         <activity

@@ -74,7 +74,7 @@ class WebSocketManager @Inject constructor(
     }
 
     private fun openSocket(srcLang: String, tgtLang: String) {
-        val url = "${BuildConfig.WS_BASE_URL}/translate?src=$srcLang&tgt=$tgtLang"
+        val url = "${BuildConfig.WS_BASE_URL}/ws/translate/$srcLang/$tgtLang"
         val request = Request.Builder().url(url).build()
 
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
