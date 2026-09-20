@@ -94,6 +94,19 @@ class AudioChunkBuffer @Inject constructor() {
         utteranceBytes = 0
     }
 
+    /**
+     * Full reset including the ring buffer -- call at the start of a new session so stale audio
+     * from a previous one (e.g. a mid-utterance stop) can't bleed into the next session's first
+     * utterance as bogus pre-speech context.
+     */
+    fun reset() {
+        chunkAccumulator.reset()
+        ringBuffer.clear()
+        ringBufferBytes = 0
+        utteranceAccumulator.reset()
+        utteranceBytes = 0
+    }
+
     fun currentUtteranceDurationMs(): Int = utteranceBytes / AudioConfig.BYTES_PER_MS
 
     private fun addToRingBuffer(frame: ByteArray) {

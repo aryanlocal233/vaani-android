@@ -65,6 +65,8 @@ class TranslationOrchestrator @Inject constructor(
         scope = CoroutineScope(Dispatchers.Default + Job())
 
         vadManager.reset()
+        audioChunkBuffer.reset()
+        audioPlaybackManager.reset()
         _conversationState.value = ConversationState.IDLE
         _currentTranscript.value = ""
         _currentTranslation.value = ""
@@ -87,9 +89,9 @@ class TranslationOrchestrator @Inject constructor(
             }
         }
 
-        webSocketManager.connect(srcLang, tgtLang)
         observeWebSocketEvents()
         observeAudioFrames()
+        webSocketManager.connect(srcLang, tgtLang)
         audioRecordManager.start()
 
         Timber.i("TranslationOrchestrator: session started ($srcLang -> $tgtLang)")

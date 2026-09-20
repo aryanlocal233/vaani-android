@@ -130,16 +130,25 @@ class AudioPlaybackManager @Inject constructor() {
         chunkChannel.trySend(data)
     }
 
+    /**
+     * Cancels any in-flight playback job and drains leftover queued chunks, without touching
+     * the AudioTrack. Idempotent and safe to call even when nothing is playing -- meant to be
+     * called defensively at the start of a new session, guarding against stale channel/job
+     * state from a previous session (e.g. one stopped mid-utterance) bleeding into a new one.
+     */
+    fun reset() {
+        playbackJob?.cancel()
+        playbackJob = null
+        while (chunkChannel.tryReceive().isSuccess) {
+            // drain leftover chunks from a previous session
+        }
+        isPlaying.set(false)
+    }
+
     /** Immediately halts playback and discards any queued audio — used for barge-in. */
     fun stopPlayback() {
         if (!isPlaying.getAndSet(false)) return
-        playbackJob?.cancel()
-        playbackJob = null
-
-        var drained = chunkChannel.tryReceive().isSuccess
-        while (drained) {
-            drained = chunkChannel.tryReceive().isSuccess
-        }
+        reset()
 
         audioTrack?.apply {
             try {

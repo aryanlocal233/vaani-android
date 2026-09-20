@@ -60,6 +60,13 @@ class AudioRecordManager @Inject constructor(
     @SuppressLint("MissingPermission")
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() {
+        // isMuted is a singleton field that outlives stop()/start(). If the previous session
+        // was stopped mid-SPEAKING (TTS still playing), stopPlayback() cancels the playback job
+        // before it ever reaches the natural "audio drained" point that calls setMuted(false) --
+        // so without this, a fresh session's mic stays permanently muted, VAD never sees real
+        // speech, and the app looks like it's "not listening".
+        isMuted.set(false)
+
         if (isRecording.get()) {
             Timber.w("AudioRecordManager already recording")
             return
