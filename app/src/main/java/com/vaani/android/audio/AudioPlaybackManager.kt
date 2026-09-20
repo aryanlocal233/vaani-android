@@ -214,7 +214,7 @@ class AudioPlaybackManager @Inject constructor() {
         private const val END_OF_STREAM_GRACE_MS = 900L
 
         /** Minimum amount of TTS audio to buffer before playback starts (see jitter buffer above). */
-        private const val PREBUFFER_TARGET_BYTES = AudioConfig.CHUNK_SIZE_BYTES * 2
+        private val PREBUFFER_TARGET_BYTES = AudioConfig.CHUNK_SIZE_BYTES * 2
 
         /**
          * Max time to wait for a second chunk to arrive before starting playback anyway.
