@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Vaani</string>
+
+    <string name="state_idle">Ready</string>
+    <string name="state_listening">Listening…</string>
+    <string name="state_processing">Translating…</string>
+    <string name="state_speaking">Speaking…</string>
+
+    <string name="label_transcript">Original</string>
+    <string name="label_translation">Translation</string>
+    <string name="hint_transcript">Speech will appear here…</string>
+    <string name="hint_translation">Translation will appear here…</string>
+
+    <string name="button_start">Start Conversation</string>
+    <string name="button_stop">Stop Conversation</string>
+
+    <string name="status_connected">Connected</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_connecting">Connecting…</string>
+
+    <string name="permission_mic_rationale">Vaani needs microphone access to listen and translate your speech in real time.</string>
+    <string name="permission_mic_denied">Microphone permission is required for Vaani to work. Please enable it in Settings.</string>
+    <string name="permission_grant">Grant Permission</string>
+    <string name="permission_open_settings">Open Settings</string>
+
+    <string name="notification_channel_name">Vaani Translation</string>
+    <string name="notification_title">Vaani is translating</string>
+    <string name="notification_text">Listening for speech in the background</string>
+    <string name="notification_stop_action">Stop</string>
+
+    <string name="content_desc_swap_languages">Swap languages</string>
+    <string name="content_desc_waveform">Listening animation</string>
+    <string name="error_offline">No internet connection. Please connect and try again.</string>
+</resources>

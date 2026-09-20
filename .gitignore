@@ -1,0 +1,23 @@
+*.iml
+.gradle
+/local.properties
+.DS_Store
+/build
+/captures
+.externalNativeBuildq
+.cxx
+local.properties
+app/build
+app/release
+
+# IDE
+.idea/
+*.iws
+*.ipr
+
+# Keystores
+*.jks
+*.keystore
+
+# Log
+*.log

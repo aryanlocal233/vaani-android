@@ -1,0 +1,5 @@
+sdk.dir=/path/to/Android/sdk
+
+BHASHINI_API_KEY=your_bhashini_api_key_here
+BHASHINI_USER_ID=your_bhashini_user_id_here
+WS_BASE_URL=ws://10.0.2.2:8000
