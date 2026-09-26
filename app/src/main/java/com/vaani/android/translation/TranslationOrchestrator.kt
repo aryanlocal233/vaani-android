@@ -41,6 +41,7 @@ class TranslationOrchestrator @Inject constructor(
     private var silenceMs = 0
     private var isUtteranceActive = false
     private var isFirstChunkOfUtterance = false
+    private var idleMs = 0
 
     private val _conversationState = MutableStateFlow(ConversationState.IDLE)
     val conversationState: StateFlow<ConversationState> = _conversationState.asStateFlow()
@@ -72,6 +73,21 @@ class TranslationOrchestrator @Inject constructor(
     private val _detectedTgtLang = MutableStateFlow<String?>(null)
     val detectedTgtLang: StateFlow<String?> = _detectedTgtLang.asStateFlow()
 
+    /**
+     * Fired when the session has sat with no detected speech for [IDLE_TIMEOUT_MS] -- "detected
+     * speech" is VAD's speech/non-speech call, which is language-agnostic and already tuned to
+     * reject background noise (see [com.vaani.android.audio.VADManager]), so this naturally
+     * covers "check if it's noise or any language" without needing separate logic here: ambient
+     * noise alone never resets [idleMs], only VAD actually classifying a frame as speech does,
+     * regardless of which of the 12 supported languages it turns out to be.
+     *
+     * This only notifies -- it deliberately does not call [stopSession] itself, since that would
+     * cancel [scope] from inside a coroutine running on that same [scope] (the frame-handling
+     * collector). The caller (ViewModel) calls [stopSession] from its own, unrelated scope,
+     * exactly like a manual stop-button press.
+     */
+    var onIdleTimeout: (() -> Unit)? = null
+
     private var isSessionActive = false
 
     fun startSession(srcLang: String, tgtLang: String) {
@@ -82,6 +98,7 @@ class TranslationOrchestrator @Inject constructor(
         vadManager.reset()
         audioChunkBuffer.reset()
         audioPlaybackManager.reset()
+        idleMs = 0
         _conversationState.value = ConversationState.IDLE
         _currentTranscript.value = ""
         _currentTranslation.value = ""
@@ -147,6 +164,14 @@ class TranslationOrchestrator @Inject constructor(
             ConversationState.IDLE -> {
                 if (vadResult.isSpeech) {
                     beginUtterance()
+                } else {
+                    idleMs += AudioConfig.FRAME_SIZE_MS
+                    if (idleMs >= IDLE_TIMEOUT_MS) {
+                        idleMs = 0 // guard against re-firing every frame if the caller is slow to stop
+                        Timber.i("No speech detected for ${IDLE_TIMEOUT_MS}ms -- ending conversation due to inactivity")
+                        _error.value = "Conversation ended due to inactivity"
+                        onIdleTimeout?.invoke()
+                    }
                 }
             }
             ConversationState.LISTENING -> {
@@ -278,6 +303,16 @@ class TranslationOrchestrator @Inject constructor(
 
     private fun transitionTo(newState: ConversationState) {
         Timber.d("State transition: ${_conversationState.value} -> $newState")
+        if (newState == ConversationState.IDLE) idleMs = 0
         _conversationState.value = newState
+    }
+
+    companion object {
+        /**
+         * How long the session can sit idle (no speech detected, in any supported language --
+         * see [onIdleTimeout]) before it's considered abandoned and ended automatically. Picked
+         * as the middle of the requested 30-40s window.
+         */
+        private const val IDLE_TIMEOUT_MS = 35_000
     }
 }

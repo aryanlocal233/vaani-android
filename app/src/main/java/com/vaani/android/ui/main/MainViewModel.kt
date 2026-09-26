@@ -154,6 +154,12 @@ class MainViewModel @Inject constructor(
         if (!_hasMicPermission.value) return
         if (!networkUtils.isOnline()) return
 
+        // Auto-stop after a prolonged period with no detected speech (any language -- see
+        // TranslationOrchestrator.onIdleTimeout). Called from viewModelScope, not from inside
+        // the orchestrator's own frame-processing coroutine, so this is exactly like a manual
+        // stop-button press as far as the orchestrator is concerned.
+        orchestrator.onIdleTimeout = { viewModelScope.launch { stopSession() } }
+
         _isSessionActive.value = true
         orchestrator.startSession(_sourceLanguage.value.code, _targetLanguage.value.code)
     }
