@@ -208,6 +208,15 @@ class MainActivity : AppCompatActivity() {
         binding.tvTranslation.text = state.translation.ifBlank { getString(R.string.hint_translation) }.let { text ->
             state.detectedTgtLanguageName?.let { lang -> "[$lang] $text" } ?: text
         }
+        // Only shown for an FAQ hit answered in the pilgrim's language when that differs from
+        // the operator's -- the card stays hidden the rest of the time rather than showing a
+        // hint, since "nothing to show the operator" is the normal case, not an empty state.
+        if (state.operatorNote.isNotBlank()) {
+            binding.cardOperatorNote.visibility = android.view.View.VISIBLE
+            binding.tvOperatorNote.text = state.operatorNote
+        } else {
+            binding.cardOperatorNote.visibility = android.view.View.GONE
+        }
     }
 
     private fun renderConnectionStatus(isConnected: Boolean) {

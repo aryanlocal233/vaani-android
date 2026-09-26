@@ -12,6 +12,7 @@
 
     <string name="label_transcript">Original</string>
     <string name="label_translation">Translation</string>
+    <string name="label_operator_note">For Help-Desk Operator</string>
     <string name="hint_transcript">Speech will appear here…</string>
     <string name="hint_translation">Translation will appear here…</string>
 

@@ -32,7 +32,8 @@ data class MainUiState(
     val hasMicPermission: Boolean = false,
     val isSwitchingLanguage: Boolean = false,
     val detectedSrcLanguageName: String? = null,
-    val detectedTgtLanguageName: String? = null
+    val detectedTgtLanguageName: String? = null,
+    val operatorNote: String = ""
 )
 
 @HiltViewModel
@@ -60,7 +61,8 @@ class MainViewModel @Inject constructor(
         _isSessionActive,
         _isSwitchingLanguage,
         orchestrator.detectedSrcLang,
-        orchestrator.detectedTgtLang
+        orchestrator.detectedTgtLang,
+        orchestrator.operatorNote
     ) { flows ->
         MainUiState(
             allLanguages = languageRepository.getAllLanguages(),
@@ -75,7 +77,8 @@ class MainViewModel @Inject constructor(
             hasMicPermission = _hasMicPermission.value,
             isSwitchingLanguage = flows[8] as Boolean,
             detectedSrcLanguageName = (flows[9] as String?)?.let { languageRepository.getLanguageByCode(it)?.name },
-            detectedTgtLanguageName = (flows[10] as String?)?.let { languageRepository.getLanguageByCode(it)?.name }
+            detectedTgtLanguageName = (flows[10] as String?)?.let { languageRepository.getLanguageByCode(it)?.name },
+            operatorNote = flows[11] as String
         )
     }.stateIn(
         scope = viewModelScope,

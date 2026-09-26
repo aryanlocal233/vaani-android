@@ -40,6 +40,10 @@ sealed class WebSocketEvent {
     data class TtsAudioReceived(val pcm: ByteArray) : WebSocketEvent()
     data class TranscriptReceived(val text: String, val isFinal: Boolean, val lang: String) : WebSocketEvent()
     data class TranslationReceived(val text: String, val lang: String) : WebSocketEvent()
+    /** Sent only for an FAQ hit where the pilgrim's own language differs from the operator's --
+     * the answer above is spoken to the pilgrim in their language (self-service); this is the
+     * same answer translated into the operator's language, for their own awareness/oversight. */
+    data class OperatorTranslationReceived(val text: String, val lang: String) : WebSocketEvent()
     data class ServerError(val message: String) : WebSocketEvent()
     data class ConnectionFailed(val throwable: Throwable) : WebSocketEvent()
     data class NoSpeech(val message: String) : WebSocketEvent()
@@ -170,6 +174,14 @@ class WebSocketManager @Inject constructor(
                 "translation" -> scope.launch {
                     _events.emit(
                         WebSocketEvent.TranslationReceived(
+                            text = json.optString("text"),
+                            lang = json.optString("lang")
+                        )
+                    )
+                }
+                "operator_translation" -> scope.launch {
+                    _events.emit(
+                        WebSocketEvent.OperatorTranslationReceived(
                             text = json.optString("text"),
                             lang = json.optString("lang")
                         )

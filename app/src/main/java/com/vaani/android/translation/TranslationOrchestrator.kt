@@ -52,6 +52,11 @@ class TranslationOrchestrator @Inject constructor(
     private val _currentTranslation = MutableStateFlow("")
     val currentTranslation: StateFlow<String> = _currentTranslation.asStateFlow()
 
+    /** Set only for an FAQ hit answered in a language other than the operator's -- see
+     * WebSocketEvent.OperatorTranslationReceived. Null/blank means "nothing to show". */
+    private val _operatorNote = MutableStateFlow("")
+    val operatorNote: StateFlow<String> = _operatorNote.asStateFlow()
+
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
@@ -102,6 +107,7 @@ class TranslationOrchestrator @Inject constructor(
         _conversationState.value = ConversationState.IDLE
         _currentTranscript.value = ""
         _currentTranslation.value = ""
+        _operatorNote.value = ""
         _detectedSrcLang.value = null
         _detectedTgtLang.value = null
         _error.value = null
@@ -214,6 +220,7 @@ class TranslationOrchestrator @Inject constructor(
         silenceMs = 0
         _detectedSrcLang.value = null
         _detectedTgtLang.value = null
+        _operatorNote.value = "" // stale note from the previous utterance shouldn't linger
         transitionTo(ConversationState.LISTENING)
     }
 
@@ -265,6 +272,9 @@ class TranslationOrchestrator @Inject constructor(
                     is WebSocketEvent.TranslationReceived -> {
                         _currentTranslation.value = event.text
                         if (event.lang.isNotBlank()) _detectedTgtLang.value = event.lang
+                    }
+                    is WebSocketEvent.OperatorTranslationReceived -> {
+                        _operatorNote.value = event.text
                     }
                     is WebSocketEvent.ServerError -> {
                         _error.value = event.message
