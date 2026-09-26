@@ -87,6 +87,27 @@ class MainViewModel @Inject constructor(
         )
     )
 
+    init {
+        // Dropdown 1 (operator/help-desk language) is manually selected and never auto-changes.
+        // Dropdown 2 (the public-facing visitor) should reflect whoever the backend actually
+        // detected speaking, if that's not the operator -- the backend now auto-detects across
+        // every supported language on that side, not just whatever was pre-selected here, so
+        // this just follows it. Deliberately a separate collector from the combine() below (not
+        // folded into it) and doesn't call restartSession(): the backend already tracks the
+        // visitor's language server-side for this connection, so there's nothing to reconnect
+        // for -- this only updates what dropdown 2 displays.
+        viewModelScope.launch {
+            orchestrator.detectedSrcLang.collect { code ->
+                if (code == null || code == _sourceLanguage.value.code) return@collect
+                languageRepository.getLanguageByCode(code)?.let { visitorLanguage ->
+                    if (visitorLanguage.code != _targetLanguage.value.code) {
+                        _targetLanguage.value = visitorLanguage
+                    }
+                }
+            }
+        }
+    }
+
     fun setMicPermissionGranted(granted: Boolean) {
         _hasMicPermission.value = granted
     }
