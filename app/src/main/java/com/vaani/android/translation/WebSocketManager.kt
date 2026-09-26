@@ -1,6 +1,7 @@
 package com.vaani.android.translation
 
 import com.vaani.android.BuildConfig
+import com.vaani.android.utils.DeviceInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,6 +24,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.min
 import kotlin.math.pow
+import java.net.URLEncoder
 
 /** Frame type flags for the binary WebSocket protocol (client<->server). */
 object WsFrameType {
@@ -53,7 +55,8 @@ sealed class WebSocketEvent {
  */
 @Singleton
 class WebSocketManager @Inject constructor(
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    private val deviceInfo: DeviceInfo
 ) {
     private var webSocket: WebSocket? = null
     private val scope = CoroutineScope(Dispatchers.IO + Job())
@@ -75,7 +78,14 @@ class WebSocketManager @Inject constructor(
     }
 
     private fun openSocket(srcLang: String, tgtLang: String) {
-        val url = "${BuildConfig.WS_BASE_URL}/ws/translate/$srcLang/$tgtLang"
+        // Device details ride as query params, not new path segments -- purely additive to the
+        // protocol, so the backend can still be rolled back without breaking this client, and an
+        // older client connecting to a newer backend just shows up as "unknown device".
+        val url = "${BuildConfig.WS_BASE_URL}/ws/translate/$srcLang/$tgtLang" +
+            "?device_id=${deviceInfo.deviceId}" +
+            "&device_model=${urlEncode(deviceInfo.deviceModel)}" +
+            "&os_version=${urlEncode(deviceInfo.osVersion)}" +
+            "&app_version=${urlEncode(deviceInfo.appVersion)}"
         val request = Request.Builder().url(url).build()
 
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
@@ -197,6 +207,8 @@ class WebSocketManager @Inject constructor(
             Timber.w("Failed to send WS frame (flag=$flag), socket not open")
         }
     }
+
+    private fun urlEncode(value: String): String = URLEncoder.encode(value, "UTF-8")
 
     private fun startHeartbeat() {
         stopHeartbeat()
