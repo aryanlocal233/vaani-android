@@ -2,8 +2,10 @@ package com.vaani.android.audio
 
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Process
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,10 +34,14 @@ import javax.inject.Singleton
  * immediate [stopPlayback] for barge-in (user starts speaking while TTS is still playing).
  */
 @Singleton
-class AudioPlaybackManager @Inject constructor() {
+class AudioPlaybackManager @Inject constructor(
+    @ApplicationContext private val context: android.content.Context
+) {
 
     private var audioTrack: AudioTrack? = null
     private var playbackJob: Job? = null
+    private var outputSampleRate: Int = AudioConfig.SAMPLE_RATE
+    private var resampler: LinearResampler = LinearResampler(AudioConfig.SAMPLE_RATE, AudioConfig.SAMPLE_RATE)
 
     // Dedicated urgent-audio-priority thread instead of the shared Dispatchers.IO pool -- same
     // reasoning as AudioRecordManager's recordingExecutor: this loop's job is feeding
@@ -56,12 +62,20 @@ class AudioPlaybackManager @Inject constructor() {
     fun start() {
         if (isPlaying.get()) return
 
+        // Resample TTS audio (16kHz) up to the device's native mixer rate ourselves, rather
+        // than configuring AudioTrack at 16kHz and letting the platform resample on every
+        // write. On a number of real devices/emulators that platform resampling path is what
+        // actually produces audible crackle during playback, independent of buffering/jitter.
+        val nativeRate = resolveNativeOutputSampleRate()
+        outputSampleRate = nativeRate
+        resampler = LinearResampler(AudioConfig.SAMPLE_RATE, nativeRate)
+
         val minBufferSize = AudioTrack.getMinBufferSize(
-            AudioConfig.SAMPLE_RATE,
+            nativeRate,
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT
         )
-        val bufferSize = maxOf(minBufferSize, AudioConfig.CHUNK_SIZE_BYTES * 8)
+        val bufferSize = maxOf(minBufferSize, (AudioConfig.CHUNK_SIZE_BYTES.toLong() * nativeRate / AudioConfig.SAMPLE_RATE).toInt() * 8)
 
         val track = AudioTrack.Builder()
             .setAudioAttributes(
@@ -72,7 +86,7 @@ class AudioPlaybackManager @Inject constructor() {
             )
             .setAudioFormat(
                 AudioFormat.Builder()
-                    .setSampleRate(AudioConfig.SAMPLE_RATE)
+                    .setSampleRate(nativeRate)
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .build()
@@ -133,23 +147,62 @@ class AudioPlaybackManager @Inject constructor() {
                 } catch (e: IllegalStateException) {
                     Timber.w(e, "AudioTrack pause/flush between utterances failed")
                 }
+                // The flush above is itself a discontinuity, so there's nothing to preserve
+                // continuity with -- start the next utterance's resampling fresh rather than
+                // carrying over interpolation state across a gap that was never continuous audio.
+                resampler.reset()
                 Timber.d("AudioPlaybackManager: utterance audio drained, onPlaybackFinished firing")
                 withContext(Dispatchers.Main) { onPlaybackFinished?.invoke() }
             }
         }
-        Timber.i("AudioPlaybackManager started (bufferSize=$bufferSize)")
+        Timber.i("AudioPlaybackManager started (bufferSize=$bufferSize, nativeRate=$nativeRate)")
+    }
+
+    private fun resolveNativeOutputSampleRate(): Int {
+        return try {
+            val am = context.getSystemService(android.content.Context.AUDIO_SERVICE) as? AudioManager
+            val rate = am?.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull()
+            if (rate != null && rate > 0) rate else FALLBACK_NATIVE_SAMPLE_RATE
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to resolve native output sample rate, falling back to $FALLBACK_NATIVE_SAMPLE_RATE")
+            FALLBACK_NATIVE_SAMPLE_RATE
+        }
     }
 
     private fun writeChunk(track: AudioTrack, chunk: ByteArray) {
+        val resampled = resampleToOutputRate(chunk)
         var offset = 0
-        while (offset < chunk.size && isPlaying.get()) {
-            val written = track.write(chunk, offset, chunk.size - offset)
+        while (offset < resampled.size && isPlaying.get()) {
+            val written = track.write(resampled, offset, resampled.size - offset)
             if (written < 0) {
                 Timber.e("AudioTrack.write error: $written")
                 break
             }
             offset += written
         }
+    }
+
+    /** Converts a PCM16LE byte chunk to samples, resamples to [outputSampleRate], and back to bytes. */
+    private fun resampleToOutputRate(chunk: ByteArray): ByteArray {
+        if (resampler.isIdentity) return chunk
+
+        val sampleCount = chunk.size / 2
+        val input = ShortArray(sampleCount)
+        for (i in 0 until sampleCount) {
+            val lo = chunk[i * 2].toInt() and 0xFF
+            val hi = chunk[i * 2 + 1].toInt()
+            input[i] = ((hi shl 8) or lo).toShort()
+        }
+
+        val output = resampler.process(input)
+
+        val bytes = ByteArray(output.size * 2)
+        for (i in output.indices) {
+            val sample = output[i].toInt()
+            bytes[i * 2] = (sample and 0xFF).toByte()
+            bytes[i * 2 + 1] = ((sample shr 8) and 0xFF).toByte()
+        }
+        return bytes
     }
 
     /** Queues a chunk of TTS PCM audio for immediate playback. */
@@ -225,5 +278,8 @@ class AudioPlaybackManager @Inject constructor() {
          * 100ms of startup latency it costs.
          */
         private const val PREBUFFER_WAIT_MS = 250L
+
+        /** Used only if [AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE] is unavailable -- 48kHz is the near-universal native rate on modern Android audio HALs. */
+        private const val FALLBACK_NATIVE_SAMPLE_RATE = 48000
     }
 }
