@@ -265,6 +265,9 @@ class TranslationOrchestrator @Inject constructor(
                     is WebSocketEvent.TtsAudioReceived -> {
                         audioPlaybackManager.queueAudioChunk(event.pcm)
                     }
+                    is WebSocketEvent.TtsStreamEnded -> {
+                        audioPlaybackManager.markStreamEnded()
+                    }
                     is WebSocketEvent.TranscriptReceived -> {
                         _currentTranscript.value = event.text
                         if (event.lang.isNotBlank()) _detectedSrcLang.value = event.lang

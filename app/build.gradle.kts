@@ -100,7 +100,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     implementation(libs.okhttp)
-    debugImplementation(libs.okhttp.logging.interceptor)
+    // AppModule.kt references HttpLoggingInterceptor directly (guarded by a *runtime*
+    // BuildConfig.DEBUG check, not a compile-time one) -- debugImplementation alone left it off
+    // the release classpath entirely, so assembleRelease has never actually compiled.
+    implementation(libs.okhttp.logging.interceptor)
 
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)

@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -130,17 +131,35 @@ class AudioPlaybackManager @Inject constructor(
                     Timber.w(e, "AudioTrack resume failed")
                 }
                 withContext(Dispatchers.Main) { onPlaybackStarted?.invoke() }
-                prebuffered.forEach { writeChunk(track, it) }
+                var framesWrittenThisUtterance = 0L
+                prebuffered.forEach { framesWrittenThisUtterance += writeChunk(track, it) }
 
+                // "No more chunks" can be learned two ways: an explicit end-of-stream marker
+                // (see markStreamEnded -- the server now sends a "tts_end" JSON frame once all
+                // of a reply's audio is out, not a guess) or, as a fallback for anything that
+                // slips through without one, this quiet-period timeout. Either way, this loop
+                // only decides chunks have stopped *arriving* -- it does NOT mean the audio
+                // already handed to AudioTrack has finished *playing*; that's checked separately
+                // below via waitForPlaybackDrain, which is the actual fix for audio cutting off
+                // early (see END_OF_STREAM_GRACE_MS's and waitForPlaybackDrain's docs).
                 while (isActive && isPlaying.get()) {
                     val chunk = withTimeoutOrNull(END_OF_STREAM_GRACE_MS) { chunkChannel.receive() } ?: break
-                    writeChunk(track, chunk)
+                    if (chunk === END_OF_STREAM_MARKER) break
+                    framesWrittenThisUtterance += writeChunk(track, chunk)
                 }
 
                 if (!isPlaying.get()) break
 
-                // Utterance's audio has fully drained. Quiesce playback but keep the
-                // AudioTrack alive (not released) so the next utterance can reuse it.
+                waitForPlaybackDrain(track, framesWrittenThisUtterance)
+                if (!isPlaying.get()) break
+
+                // Only now -- once actual playback has caught up to the last frame we wrote --
+                // is it safe to flush. Doing this immediately after the loop above (the old
+                // behavior) discarded whatever was still sitting in AudioTrack's buffer waiting
+                // to be rendered, which is exactly what was cutting replies off before they
+                // finished: chunks for a reply (especially a multi-sentence one) can be written
+                // faster than they play back, so "no new chunk arrived" does not mean "nothing
+                // left to play."
                 try {
                     track.pause()
                     track.flush()
@@ -169,7 +188,10 @@ class AudioPlaybackManager @Inject constructor(
         }
     }
 
-    private fun writeChunk(track: AudioTrack, chunk: ByteArray) {
+    /** Writes a chunk to the track and returns how many output frames were actually written
+     * (16-bit mono, so 2 bytes/frame) -- used by [waitForPlaybackDrain] to know how much
+     * audio still has to physically play out before this utterance is really done. */
+    private fun writeChunk(track: AudioTrack, chunk: ByteArray): Long {
         val resampled = resampleToOutputRate(chunk)
         var offset = 0
         while (offset < resampled.size && isPlaying.get()) {
@@ -179,6 +201,35 @@ class AudioPlaybackManager @Inject constructor(
                 break
             }
             offset += written
+        }
+        return offset / 2L
+    }
+
+    /**
+     * Blocks (suspending, not the playback thread) until [track] has actually rendered
+     * [framesWritten] frames, or [DRAIN_MAX_WAIT_MS] has passed -- whichever comes first. This is
+     * the fix for TTS audio cutting off before a reply finishes: `AudioTrack.write()` in
+     * MODE_STREAM only blocks once its internal buffer is full, so a burst of chunks (the norm
+     * here -- the backend synthesizes sentences concurrently but can still deliver several in
+     * quick succession) can all be *written* well before they're actually *played*. The old code
+     * called pause()+flush() the moment no new chunk arrived for a while, which silently discards
+     * anything still sitting in that buffer unplayed -- exactly the reported symptom. The timeout
+     * is a safety net against a device/AudioTrack quirk where playbackHeadPosition never quite
+     * catches up (better to cut a few ms early after 3s than hang the state machine forever).
+     */
+    private suspend fun CoroutineScope.waitForPlaybackDrain(track: AudioTrack, framesWritten: Long) {
+        val deadline = System.currentTimeMillis() + DRAIN_MAX_WAIT_MS
+        while (isActive && isPlaying.get()) {
+            val playedFrames = track.playbackHeadPosition.toLong() and 0xFFFFFFFFL
+            if (playedFrames >= framesWritten) return
+            if (System.currentTimeMillis() >= deadline) {
+                Timber.w(
+                    "AudioPlaybackManager: drain wait exceeded ${DRAIN_MAX_WAIT_MS}ms " +
+                        "(played=$playedFrames, written=$framesWritten) -- proceeding anyway"
+                )
+                return
+            }
+            delay(DRAIN_POLL_INTERVAL_MS)
         }
     }
 
@@ -209,6 +260,18 @@ class AudioPlaybackManager @Inject constructor(
     fun queueAudioChunk(data: ByteArray) {
         if (!isPlaying.get()) start()
         chunkChannel.trySend(data)
+    }
+
+    /**
+     * Signals that the server has finished sending audio for the current reply (the "tts_end"
+     * WS message -- see WebSocketEvent.TtsStreamEnded), so the playback loop can stop waiting for
+     * more chunks immediately instead of only via [END_OF_STREAM_GRACE_MS]'s quiet-period guess.
+     * Guarded on [isPlaying] so a signal that arrives with nothing in flight (nothing was ever
+     * queued, or a previous utterance already finished) can't contaminate a future utterance's
+     * channel.
+     */
+    fun markStreamEnded() {
+        if (isPlaying.get()) chunkChannel.trySend(END_OF_STREAM_MARKER)
     }
 
     /**
@@ -263,8 +326,27 @@ class AudioPlaybackManager @Inject constructor(
          * so it's picked up as an audible burst of noise. 900ms is a middle ground: still ~40%
          * faster than the original 1500ms, with real headroom over the ~350-400ms inter-sentence
          * gaps measured locally.
+         *
+         * Now mainly a fallback: the server sends an explicit "tts_end" message once a reply's
+         * audio is fully sent (see [markStreamEnded]), so this timeout only matters if that
+         * signal is ever lost. Either way, "no more chunks are arriving" was never the same
+         * question as "has everything already written actually finished playing" -- that's
+         * [waitForPlaybackDrain]'s job, and skipping it was the actual cause of replies cutting
+         * off early.
          */
         private const val END_OF_STREAM_GRACE_MS = 900L
+
+        /** Sentinel pushed through [chunkChannel] by [markStreamEnded] -- compared by reference,
+         * never mistaken for a real (possibly also empty) audio chunk. */
+        private val END_OF_STREAM_MARKER = ByteArray(0)
+
+        /** Max time [waitForPlaybackDrain] will wait for AudioTrack to finish rendering
+         * already-written audio before giving up and proceeding anyway (safety net against a
+         * device/AudioTrack quirk where playbackHeadPosition never quite reaches the target). */
+        private const val DRAIN_MAX_WAIT_MS = 3_000L
+
+        /** Poll interval for [waitForPlaybackDrain]. */
+        private const val DRAIN_POLL_INTERVAL_MS = 20L
 
         /** Minimum amount of TTS audio to buffer before playback starts (see jitter buffer above). */
         private val PREBUFFER_TARGET_BYTES = AudioConfig.CHUNK_SIZE_BYTES * 2

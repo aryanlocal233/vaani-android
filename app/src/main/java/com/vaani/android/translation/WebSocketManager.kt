@@ -47,6 +47,9 @@ sealed class WebSocketEvent {
     data class ServerError(val message: String) : WebSocketEvent()
     data class ConnectionFailed(val throwable: Throwable) : WebSocketEvent()
     data class NoSpeech(val message: String) : WebSocketEvent()
+    /** All TTS audio chunks for the current reply have been sent -- explicit end-of-stream
+     * signal, not a guess based on a quiet period (see AudioPlaybackManager.markStreamEnded). */
+    data object TtsStreamEnded : WebSocketEvent()
 }
 
 /**
@@ -192,6 +195,9 @@ class WebSocketManager @Inject constructor(
                 }
                 "no_speech" -> scope.launch {
                     _events.emit(WebSocketEvent.NoSpeech(json.optString("message")))
+                }
+                "tts_end" -> scope.launch {
+                    _events.emit(WebSocketEvent.TtsStreamEnded)
                 }
                 else -> Timber.w("Unknown text frame type: $text")
             }
